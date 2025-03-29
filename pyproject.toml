@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dicom2bids"
+version = "0.1.0"
+description = "Convert DICOM data to BIDS format"
+readme = "README.md"
+authors = [
+  { name="Your Name", email="you@example.com" }
+]
+keywords = ["dicom", "bids", "mri"]
+classifiers = [
+  "Programming Language :: Python :: 3"
+]
+requires-python = ">=3.7"
+dependencies = [
+  "nibabel",
+  "pydicom",
+  "pandas",
+  # etc...
+]
+
+[project.urls]
+"Source Code" = "https://github.com/YourUser/my_dicom2bids"
+
+[project.scripts]
+dicom2bids = "dicom2bids.main:main"

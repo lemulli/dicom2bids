@@ -5,38 +5,15 @@ import sys
 import shutil
 import logging
 from pathlib import Path
-from .utils import get_output_path
-import argparse
+from .utils import get_output_path, setup_logging
 import subprocess
+from .config import Config
+from datetime import datetime
 
 ################################################################################
 # LOGGING CONFIGURATION
 ################################################################################
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)  # gather all logs at DEBUG level internally
-
-# Console handler: show only ERROR+ from logger
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setLevel(logging.ERROR)
-console_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-console_handler.setFormatter(console_formatter)
-logger.addHandler(console_handler)
-
-# File handler: record INFO+ to 'outputs/log/dicom_to_bids.log'
-info_log = str(get_output_path("dicom_to_bids", "", "log").with_suffix('.log'))
-file_handler = logging.FileHandler(info_log, mode="w")
-file_handler.setLevel(logging.INFO)
-file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-file_handler.setFormatter(file_formatter)
-logger.addHandler(file_handler)
-
-# Warning handler: record WARNING+ to 'outputs/log/dicom_to_bids.err'
-warning_log = str(get_output_path("dicom_to_bids", "", "log").with_suffix('.err'))
-warning_handler = logging.FileHandler(warning_log, mode="w")
-warning_handler.setLevel(logging.WARNING)
-warning_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-warning_handler.setFormatter(warning_formatter)
-logger.addHandler(warning_handler)
 
 ################################################################################
 # FUNCTIONS
@@ -78,7 +55,7 @@ def create_bids_dir(old_dir: Path, new_dir: Path):
     shutil.copytree(old_dir, new_dir, dirs_exist_ok=True)
     logger.info("Finished copying directory structure.")
 
-def run_dcm2niix_on_unprocessed(base_path: Path):
+def run_dcm2niix_on_unprocessed(base_path: Path, config: Config):
     """
     Find folders with .dcm files, convert them to NIfTI, remove .dcm.
     """
@@ -87,23 +64,49 @@ def run_dcm2niix_on_unprocessed(base_path: Path):
         if subfolder.is_dir() and any(subfolder.glob("*.dcm")):
             unprocessed_folders.append(subfolder)
 
-    for folder_to_convert in unprocessed_folders:
-        logger.info(f"Converting DICOMs in {folder_to_convert} with dcm2niix...")
+    total_folders = len(unprocessed_folders)
+    print(f"Found {total_folders} folders with DICOM files to process")
+
+    for idx, folder_to_convert in enumerate(unprocessed_folders, 1):
+        # Extract subject information from the path
+        try:
+            # Get the relative path from base_path to get the correct subject ID
+            rel_path = folder_to_convert.relative_to(base_path)
+            subject_id = rel_path.parts[0]  # First part of relative path is subject ID
+            scan_folder = folder_to_convert.name
+        except Exception as e:
+            logger.warning(f"Could not extract subject info from path {folder_to_convert}: {e}")
+            subject_id = "Unknown"
+            scan_folder = folder_to_convert.name
+
+        print(f"\nProcessing folder {idx}/{total_folders}:")
+        print(f"Subject: {subject_id}")
+        print(f"Folder: {scan_folder}")
         
         # Add header to log files in outputs/log directory
-        conversion_log = str(get_output_path("dcm2niix", "", "log").with_suffix('.log'))
-        errors_log = str(get_output_path("dcm2niix", "", "log").with_suffix('.err'))
+        conversion_log = str(Path(config.paths.log_dir) / "dcm2niix.log")
+        errors_log = str(Path(config.paths.log_dir) / "dcm2niix.err")
         
-        with open(conversion_log, "w") as f:
-            f.write(f"=== Processing folder: {folder_to_convert} ===\n\n")
-        with open(errors_log, "w") as f:
-            f.write(f"=== Processing folder: {folder_to_convert} ===\n\n")
+        log_header = f"""
+=== Processing DICOM folder ===
+Subject ID: {subject_id}
+Folder Name: {scan_folder}
+Full Path: {folder_to_convert}
+Number of DICOM files: {len(list(folder_to_convert.glob("*.dcm")))}
+Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+"""
+        
+        with open(conversion_log, "a") as f:
+            f.write(log_header)
+        with open(errors_log, "a") as f:
+            f.write(log_header)
         
         # Use -v for verbose output and -y to overwrite existing files
         cmd = f'dcm2niix -v y -y y -b y -z y -f "%d_%s" "{folder_to_convert}" >> {conversion_log} 2>> {errors_log}'
         logger.info(f"Running: {cmd}")
         os.system(cmd)
 
+        # Remove DICOM files after conversion
         dcm_files = list(folder_to_convert.glob("*.dcm"))
         for df in dcm_files:
             try:
@@ -140,7 +143,7 @@ def sort_files(base_path: Path):
         bold_ -> fmri
         _LOC_ -> localized
     """
-    print(f"\n=== Starting file sorting in base path: {base_path} ===")
+    logger.info(f"Starting file sorting in base path: {base_path}")
     
     # First, let's see what's in the base path
     logger.info("Contents of base path:")
@@ -191,8 +194,7 @@ def sort_files(base_path: Path):
                         shutil.move(str(f), str(dest))
                         logger.info(f"Moved localizer {f.name} -> {dest}")
                     except Exception as e:
-                        print(f"✗ Failed to move localizer {f.name}: {e}")
-                        logger.warning(f"Could not move {f.name}: {e}")
+                        logger.warning(f"Failed to move localizer {f.name}: {e}")
 
             # Move T1, T2, dwi, fmri
             logger.info("Checking for other scan types...")
@@ -226,11 +228,10 @@ def sort_files(base_path: Path):
                     shutil.move(str(f), str(dest))
                     logger.info(f"Moved {fn} -> {dest}")
                 except Exception as e:
-                    print(f"✗ Failed to move {fn}: {e}")
-                    logger.warning(f"Could not move {fn}: {e}")
+                    logger.warning(f"Failed to move {fn}: {e}")
 
     # After all files are processed, check and clean up DICOM folders
-    print("\n=== Checking DICOM folders for cleanup ===")
+    logger.info("\n=== Checking DICOM folders for cleanup ===")
     for subject_dir in base_path.iterdir():
         if subject_dir.is_dir():
             dicom_dir = subject_dir / "DICOM"
@@ -248,10 +249,10 @@ def sort_files(base_path: Path):
                     for item in remaining_items:
                         logger.error(f"  - {item.name} (is_dir: {item.is_dir()})")
 
-def cleanup(base_path: Path):
+def cleanup(base_path: Path, config: Config):
     """
     1) Remove leftover dti dirs
-    2) Gzip .nii
+    2) Gzip .nii if configured
     3) Move suspiciously small .nii.gz in dwi
     4) Rename _b0_ -> _b500_1000_, remove 'CANB'
     """
@@ -264,11 +265,17 @@ def cleanup(base_path: Path):
                 shutil.rmtree(dti_path)
                 logger.info(f"Removed leftover dti folder {dti_path} (had contents? {has_contents})")
 
-    # Gzip any *.nii
-    for subject_dir in base_path.iterdir():
-        if subject_dir.is_dir():
-            cmd = f'find "{subject_dir}" -type f -name "*.nii" -exec gzip {{}} \\;'
-            os.system(cmd)
+    # Gzip any *.nii if configured
+    if config.processing.compress_nifti:
+        for subject_dir in base_path.iterdir():
+            if subject_dir.is_dir():
+                cmd = f'find "{subject_dir}" -type f -name "*.nii" -exec gzip {{}} \\;'
+                os.system(cmd)
+
+    # Set up small files log
+    small_files_log = str(Path(config.paths.log_dir) / "small_files.log")
+    with open(small_files_log, "w") as f:
+        f.write("=== Small NIfTI Files Report ===\n\n")
 
     # Identify suspiciously small .nii.gz in dwi
     for subject_dir in base_path.iterdir():
@@ -296,16 +303,22 @@ def cleanup(base_path: Path):
                                 small_files.append((f, size))
                     
                     if small_files:
-                        logger.warning(f"Found small .nii.gz group {key} in {subject_dir.name}:")
-                        for f, size in small_files:
-                            logger.warning(f"  - {f.name}: {size:,} bytes")
-                        for f, _ in small_files:
-                            dest = questionable_dir / f.name
+                        with open(small_files_log, "a") as f:
+                            f.write(f"\nSubject: {subject_dir.name}\n")
+                            f.write(f"Group: {key}\n")
+                            f.write("Small files found:\n")
+                            for file_path, size in small_files:
+                                size_mb = size / (1024 * 1024)  # Convert bytes to MB
+                                f.write(f"  - {file_path.name}: {size_mb:.2f} MB\n")
+                            f.write("\n")
+                        
+                        for file_path, _ in small_files:
+                            dest = questionable_dir / file_path.name
                             try:
-                                shutil.move(str(f), str(dest))
-                                logger.info(f"Moved small file {f.name} -> {dest}")
+                                shutil.move(str(file_path), str(dest))
+                                logger.info(f"Moved small file {file_path.name} -> {dest}")
                             except Exception as e:
-                                logger.warning(f"Could not move {f.name}: {e}")
+                                logger.warning(f"Could not move {file_path.name}: {e}")
 
     # Rename '_b0_' -> '_b500_1000_', remove 'CANB'
     for subject_dir in base_path.iterdir():
@@ -331,48 +344,70 @@ def cleanup(base_path: Path):
 ################################################################################
 # MAIN
 ################################################################################
-def main():
+def main(config: Config):
     """
     Main function to convert DICOM files to BIDS format.
-    """
-    parser = argparse.ArgumentParser(description='Convert DICOM files to BIDS format')
-    parser.add_argument('dicom_dir', help='Path to directory containing DICOM files')
-    parser.add_argument('bids_dir', help='Output directory for BIDS structure')
     
-    args = parser.parse_args()
+    Parameters:
+    config (Config): Configuration object containing all necessary settings
+    """
+    # Set up logging
+    setup_logging(config)
 
     # Convert string paths to Path objects
-    dicom_dir = Path(args.dicom_dir)
-    bids_dir = Path(args.bids_dir)
+    dicom_dir = Path(config.paths.dicom_dir)
+    bids_dir = Path(config.paths.bids_dir)
 
-    logger.info(f"Starting DICOM to BIDS conversion...")
-    logger.info(f"DICOM Directory: {dicom_dir}")
-    logger.info(f"BIDS Directory: {bids_dir}")
+    print("\n=== Starting DICOM to BIDS Conversion Pipeline ===")
+    print(f"DICOM Directory: {dicom_dir}")
+    print(f"BIDS Directory: {bids_dir}\n")
 
     # Create output directory if it doesn't exist
     os.makedirs(bids_dir, exist_ok=True)
 
     # Check if dcm2niix is installed
+    print("Step 1/5: Checking dcm2niix installation...")
     if not check_dcm2niix():
-        logger.error("dcm2niix is not installed. Please install it first.")
+        print("✗ Error: dcm2niix is not installed. Please install it first.")
         sys.exit(1)
+    print("✓ dcm2niix is installed and accessible")
 
-    # Create BIDS directory structure
+    # Create BIDS directory structure with copies of DICOM files
+    print("\nStep 2/5: Copying DICOM files to BIDS directory...")
     create_bids_dir(dicom_dir, bids_dir)
+    print("✓ DICOM files copied successfully")
 
-    # Run dcm2niix on unprocessed files
-    run_dcm2niix_on_unprocessed(dicom_dir)
+    # Run dcm2niix on the copied files in bids_dir
+    print("\nStep 3/5: Converting DICOM files to NIfTI format...")
+    run_dcm2niix_on_unprocessed(bids_dir, config)
+    print("✓ DICOM to NIfTI conversion complete")
 
     # Generate BIDS structure
+    print("\nStep 4/5: Organizing files into BIDS structure...")
     generate_bids_structure(bids_dir)
-
-    # Sort files into appropriate directories
     sort_files(bids_dir)
+    print(f"✓ Files organized into BIDS structure at: {bids_dir}")
 
     # Clean up temporary files
-    cleanup(bids_dir)
+    print("\nStep 5/5: Performing final cleanup...")
+    cleanup(bids_dir, config)
+    
+    # Count small files from the log
+    small_files_log = Path(config.paths.log_dir) / "small_files.log"
+    if small_files_log.exists():
+        with open(small_files_log, "r") as f:
+            content = f.read()
+            small_files_count = content.count("Subject:")
+        print(f"✓ Cleanup complete. Found {small_files_count} suspiciously small files")
+        print(f"  Small files report available at: {small_files_log}")
+    else:
+        print("✓ Cleanup complete. No small files found")
 
+    print("\n=== DICOM to BIDS Conversion Complete! ===")
     logger.info("DICOM to BIDS conversion complete!")
 
 if __name__ == "__main__":
-    main()
+    from .config import ConfigManager
+    config_manager = ConfigManager()
+    config = config_manager.get_config()
+    main(config)

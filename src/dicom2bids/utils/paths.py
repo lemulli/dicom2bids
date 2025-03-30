@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# utils.py
+# paths.py
 
 import os
 from pathlib import Path

@@ -1,0 +1,34 @@
+# DICOM to BIDS Conversion Configuration
+
+# Directory Paths
+paths:
+  dicom_dir: "/Users/lthorn2/work/MOMMA_DICOM/LE/subjects/DICOMS"  # Directory containing DICOM files
+  bids_dir: "outputs/bids"   # Directory where BIDS structure will be created
+  log_dir: "outputs/log"     # Directory for log files
+
+# CSV File Locations
+csv_files:
+  skeleton_csv: "inputs/csv/skeleton.csv"      # CSV containing BIDS structure template
+  json_map_csv: "inputs/csv/json_map.csv"      # CSV mapping DICOM tags to BIDS JSON fields
+  final_csv: "outputs/csv/final_bids_map.csv"  # Output CSV with final BIDS mapping
+
+# Processing Options
+processing:
+  run_json_check: true        # Whether to run JSON validation check
+  check_sensitive_data: true  # Whether to check for sensitive data
+  create_derivatives: true    # Whether to create derivative files
+  compress_nifti: true       # Whether to compress NIfTI files to .nii.gz
+
+# Logging Configuration
+logging:
+  level: "INFO"              # Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  file: "dicom2bids.log"  # Log file name
+  
+  # Session Configuration
+  session:
+    enabled: true            # Whether to use session numbers in BIDS structure
+    format: "ses-{number}"   # Format for session directory names (e.g., "ses-01")
+    start_number: 1          # Starting session number
+    padding: 2               # Number of digits to pad session numbers (e.g., 01, 02, etc.)
+    auto_increment: false     # Whether to automatically increment session numbers
+    session_map: {}          # Optional mapping of subject IDs to specific session numbers 

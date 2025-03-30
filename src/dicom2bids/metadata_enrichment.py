@@ -8,9 +8,11 @@ import logging
 import pandas as pd
 import json
 from datetime import date  # if you want to store a processing date
-from .utils import get_output_path
+from pathlib import Path
+from .config import Config
+from .utils import get_output_path, setup_logging, setup_excluded_scans_logger
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+# Set up logging
 logger = logging.getLogger(__name__)
 
 def expand_for_scan_types(df: pd.DataFrame) -> pd.DataFrame:
@@ -206,35 +208,22 @@ def merge_json_data(json_map_dict, image_file_path, df, row_idx):
         logger.warning(f"Error parsing {json_file_path}: {e}")
 
 
-def main(input_csv: str = None,
-         old_bids_dir: str = None,
-         new_bids_dir: str = None,
-         t2_json_map: str = None):
+def main(config: Config):
     """
     Main function combining logic from both notebooks:
       1) Load skeleton CSV, expand & set constants
       2) Copy NIfTI & sidecars, merge JSON metadata
     """
-    # If no arguments provided, parse from sys.argv
-    if input_csv is None:
-        if len(sys.argv) != 5:
-            print(f"Usage: {sys.argv[0]} <input_csv> <old_bids_dir> <new_bids_dir> <t2_json_map>")
-            sys.exit(1)
-        input_csv = sys.argv[1]
-        old_bids_dir = sys.argv[2]
-        new_bids_dir = sys.argv[3]
-        t2_json_map = sys.argv[4]
+    # Set up logging
+    setup_logging(config)
+    excluded_scans_logger = setup_excluded_scans_logger(config)
 
-    # Get standardized output path
-    output_csv = str(get_output_path(input_csv, '_enriched', 'csv'))
-    excluded_scans_log = str(get_output_path(input_csv, '_excluded_scans', 'log').with_suffix('.log'))
-
-    # Set up logging for scans that won't be included in NIH DB
-    excluded_scans_logger = logging.getLogger('excluded_scans')
-    excluded_scans_handler = logging.FileHandler(excluded_scans_log)
-    excluded_scans_handler.setFormatter(logging.Formatter('%(message)s'))
-    excluded_scans_logger.addHandler(excluded_scans_handler)
-    excluded_scans_logger.setLevel(logging.INFO)
+    # Get paths from config
+    input_csv = config.csv_files.skeleton_csv
+    old_bids_dir = config.paths.bids_dir
+    new_bids_dir = config.paths.bids_dir
+    t2_json_map = config.csv_files.json_map_csv
+    output_csv = config.csv_files.final_csv
 
     logger.info(f"Reading input CSV: {input_csv}")
     # Skip the first row which contains 'image,3,...' and use the second row as header
@@ -288,8 +277,11 @@ def main(input_csv: str = None,
     logger.info(f"Writing final enriched CSV to: {output_csv}")
     df_expanded.to_csv(output_csv, index=False)
     logger.info("Metadata enrichment complete.")
-    logger.info(f"Excluded scans log written to: {excluded_scans_log}")
+    logger.info(f"Excluded scans log written to: {excluded_scans_logger.handlers[0].baseFilename}")
 
 
 if __name__ == "__main__":
-    main()
+    from .config import ConfigManager
+    config_manager = ConfigManager()
+    config = config_manager.get_config()
+    main(config)

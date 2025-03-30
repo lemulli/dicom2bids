@@ -17,10 +17,11 @@ dependencies = [
     "numpy",
     "pandas",
     "pathlib",
+    "pyyaml",
 ]
 
 [project.scripts]
-dicom2bids = "dicom2bids.convert_and_organize:main"
+dicom2bids = "dicom2bids.main:main"
 metadata-enrichment = "dicom2bids.metadata_enrichment:main"
 nifti-calculations = "dicom2bids.nifti_calculations:main"
 check-sensitive-data = "dicom2bids.check_sensitive_data:main"

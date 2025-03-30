@@ -10,6 +10,7 @@ import numpy as np
 import tempfile
 import zipfile
 from pathlib import Path
+from datetime import date
 from .utils import get_output_path
 
 # Set up logging

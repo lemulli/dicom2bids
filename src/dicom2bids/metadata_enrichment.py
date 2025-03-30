@@ -70,17 +70,17 @@ def convert_subject_id_to_dir(subject_id: str) -> str:
     return subject_id.replace('-', '_')
 
 
-def copy_nii_and_sidecars(row, old_bids_dir: str, new_bids_dir: str) -> str:
+def copy_nii_and_sidecars(row, old_bids_dir: str, new_bids_dir: str) -> tuple[str, str]:
     """
     Given a row with subject ID and scan type, find the largest matching .nii.gz
     in the OLD BIDS directory and copy it (plus .json, .bvec, .bval)
     to a mirrored path under NEW BIDS dir.
-    Returns the new path to the .nii.gz, or None if not found.
+    Returns a tuple of (new_nii_path, reason) where reason is None if successful,
+    or a string explaining why the file wasn't found/copied.
     """
     subject_id = row["src_subject_id"]
     if not subject_id:
-        logger.warning("No subject ID found in row.")
-        return None
+        return None, "No subject ID found in row"
 
     # Convert subject ID to directory format
     subject_dir = convert_subject_id_to_dir(subject_id)
@@ -91,10 +91,8 @@ def copy_nii_and_sidecars(row, old_bids_dir: str, new_bids_dir: str) -> str:
 
     # Construct path to subject's directory
     old_dir_path = os.path.join(old_bids_dir, subject_dir, "ses-01")
-    logger.info(f"Looking for subject directory: {old_dir_path}")
     if not os.path.exists(old_dir_path):
-        logger.warning(f"Subject directory not found: {old_dir_path}")
-        return None
+        return None, f"Subject directory not found: {old_dir_path}"
 
     # Decide subdirectory by scan type
     if scan_type == "MR structural (T2)":
@@ -104,20 +102,16 @@ def copy_nii_and_sidecars(row, old_bids_dir: str, new_bids_dir: str) -> str:
     elif scan_type == "fMRI":
         old_dir_path = os.path.join(old_dir_path, "fmri")
 
-    logger.info(f"Looking for scan type directory: {old_dir_path}")
     if not os.path.exists(old_dir_path):
-        logger.warning(f"Scan type directory not found: {old_dir_path}")
-        return None
+        return None, f"Scan type directory not found: {old_dir_path}"
 
     # Build new_dir by taking the relative path from old_bids_dir
     rel_path = os.path.relpath(old_dir_path, start=old_bids_dir)
     new_dir_path = os.path.join(new_bids_dir, rel_path)
-    logger.info(f"Creating new directory: {new_dir_path}")
     os.makedirs(new_dir_path, exist_ok=True)
 
     # Gather .nii.gz files
     files = os.listdir(old_dir_path)
-    logger.info(f"Found files in {old_dir_path}: {files}")
     nii_candidates = []
     desc_lower = img_description.lower()
 
@@ -142,41 +136,41 @@ def copy_nii_and_sidecars(row, old_bids_dir: str, new_bids_dir: str) -> str:
     elif '1000' in desc_lower:
         nii_candidates = [f for f in files if f.endswith('.nii.gz') and 'b500' in f]
 
-    logger.info(f"Found matching .nii.gz candidates: {nii_candidates}")
     if not nii_candidates:
-        logger.warning(f"No matching .nii.gz for {img_description} in {old_dir_path}")
-        return None
+        return None, f"No matching .nii.gz files found for {img_description} in {old_dir_path}"
 
     # Pick largest file
     largest_file = max(nii_candidates, key=lambda x: os.path.getsize(os.path.join(old_dir_path, x)))
     old_largest_file_path = os.path.join(old_dir_path, largest_file)
     new_largest_file_path = os.path.join(new_dir_path, largest_file)
 
-    logger.info(f"Copying from {old_largest_file_path} to {new_largest_file_path}")
-    # Copy the NIfTI using shutil (or os.system('cp'))
-    shutil.copy2(old_largest_file_path, new_largest_file_path)
-    logger.info(f"Copied {old_largest_file_path} -> {new_largest_file_path}")
+    # If source and destination are the same, just return the path
+    if os.path.abspath(old_largest_file_path) == os.path.abspath(new_largest_file_path):
+        return old_largest_file_path, None
 
-    # Copy .json
-    old_json_path = old_largest_file_path.replace('.nii.gz', '.json')
-    new_json_path = new_largest_file_path.replace('.nii.gz', '.json')
-    if os.path.exists(old_json_path):
-        shutil.copy2(old_json_path, new_json_path)
-        logger.info(f"Copied {old_json_path} -> {new_json_path}")
+    # Copy the NIfTI and sidecars
+    try:
+        shutil.copy2(old_largest_file_path, new_largest_file_path)
+        
+        # Copy .json
+        old_json_path = old_largest_file_path.replace('.nii.gz', '.json')
+        new_json_path = new_largest_file_path.replace('.nii.gz', '.json')
+        if os.path.exists(old_json_path):
+            shutil.copy2(old_json_path, new_json_path)
 
-    # Copy bvec/bval
-    old_bvec = old_largest_file_path.replace('.nii.gz', '.bvec')
-    old_bval = old_largest_file_path.replace('.nii.gz', '.bval')
-    new_bvec = new_largest_file_path.replace('.nii.gz', '.bvec')
-    new_bval = new_largest_file_path.replace('.nii.gz', '.bval')
-    if os.path.exists(old_bvec):
-        shutil.copy2(old_bvec, new_bvec)
-        logger.info(f"Copied {old_bvec} -> {new_bvec}")
-    if os.path.exists(old_bval):
-        shutil.copy2(old_bval, new_bval)
-        logger.info(f"Copied {old_bval} -> {new_bval}")
+        # Copy bvec/bval
+        old_bvec = old_largest_file_path.replace('.nii.gz', '.bvec')
+        old_bval = old_largest_file_path.replace('.nii.gz', '.bval')
+        new_bvec = new_largest_file_path.replace('.nii.gz', '.bvec')
+        new_bval = new_largest_file_path.replace('.nii.gz', '.bval')
+        if os.path.exists(old_bvec):
+            shutil.copy2(old_bvec, new_bvec)
+        if os.path.exists(old_bval):
+            shutil.copy2(old_bval, new_bval)
 
-    return new_largest_file_path
+        return new_largest_file_path, None
+    except Exception as e:
+        return None, f"Error copying files: {str(e)}"
 
 
 def merge_json_data(json_map_dict, image_file_path, df, row_idx):
@@ -208,16 +202,42 @@ def merge_json_data(json_map_dict, image_file_path, df, row_idx):
         logger.warning(f"Error parsing {json_file_path}: {e}")
 
 
+def setup_summary_logger(config):
+    """Set up a logger for the summary report"""
+    summary_logger = logging.getLogger('summary')
+    summary_logger.setLevel(logging.INFO)
+    
+    # Remove any existing handlers
+    for handler in summary_logger.handlers[:]:
+        summary_logger.removeHandler(handler)
+    
+    # Create handlers
+    summary_file = os.path.join(config.paths.log_dir, 'metadata_enrichment_summary.log')
+    os.makedirs(os.path.dirname(summary_file), exist_ok=True)
+    file_handler = logging.FileHandler(summary_file, mode='w')
+    file_handler.setLevel(logging.INFO)
+    
+    # Create formatters and add it to handlers
+    formatter = logging.Formatter('%(message)s')
+    file_handler.setFormatter(formatter)
+    
+    # Add handlers to the logger
+    summary_logger.addHandler(file_handler)
+    
+    return summary_logger
+
+
 def main(config: Config):
     """
     Main function combining logic from both notebooks:
       1) Load skeleton CSV, expand & set constants
-      2) Copy NIfTI & sidecars, merge JSON metadata
+      2) Copy NIfTIs & sidecars, merge JSON metadata
     """
     # Set up logging
     setup_logging(config)
     excluded_scans_logger = setup_excluded_scans_logger(config)
-
+    summary_logger = setup_summary_logger(config)
+    
     # Get paths from config
     input_csv = config.csv_files.skeleton_csv
     old_bids_dir = config.paths.bids_dir
@@ -255,7 +275,7 @@ def main(config: Config):
     for idx, row in df_expanded.iterrows():
         logger.info(f"Processing row {idx+1}/{len(df_expanded)}...")
         logger.debug(f"Row data: {row.to_dict()}")
-        new_nii_path = copy_nii_and_sidecars(row, old_bids_dir, new_bids_dir)
+        new_nii_path, reason = copy_nii_and_sidecars(row, old_bids_dir, new_bids_dir)
         
         # Store the final file path in the CSV, so we can see where it actually lives
         if new_nii_path:
@@ -264,7 +284,7 @@ def main(config: Config):
         else:
             df_expanded.at[idx, "image_file"] = None
             # Log excluded scan details
-            excluded_scans_logger.info(f"Scan excluded from NIH DB - Subject: {row['src_subject_id']}, Scan Type: {row.get('scan_type', 'unknown')}, Description: {row.get('image_description', 'unknown')}")
+            excluded_scans_logger.info(f"Scan excluded from NIH DB - Subject: {row['src_subject_id']}, Scan Type: {row.get('scan_type', 'unknown')}, Description: {row.get('image_description', 'unknown')}, Reason: {reason}")
             rows_to_drop.append(idx)
 
     # Drop rows with missing files
@@ -278,6 +298,63 @@ def main(config: Config):
     df_expanded.to_csv(output_csv, index=False)
     logger.info("Metadata enrichment complete.")
     logger.info(f"Excluded scans log written to: {excluded_scans_logger.handlers[0].baseFilename}")
+
+    # 7. Generate summary report
+    summary_logger.info("=== Metadata Enrichment Summary Report ===\n")
+    
+    # Missing Subjects
+    summary_logger.info("Missing Subjects (not found in BIDS directory):")
+    missing_subjects = set(df['src_subject_id'].unique()) - set(df_expanded['src_subject_id'].unique())
+    for subject in sorted(missing_subjects):
+        summary_logger.info(f"  - {subject}")
+    summary_logger.info(f"\nTotal missing subjects: {len(missing_subjects)}\n")
+    
+    # Missing Scans for Existing Subjects
+    summary_logger.info("Missing Scans for Existing Subjects:")
+    missing_scans = {}
+    for idx, row in df_expanded.iterrows():
+        if pd.isna(row['image_file']):
+            subject = row['src_subject_id']
+            if subject not in missing_scans:
+                missing_scans[subject] = []
+            missing_scans[subject].append({
+                'scan_type': row['scan_type'],
+                'description': row['image_description'],
+                'reason': 'Scan not found in BIDS directory'
+            })
+    
+    # Successfully Processed Files
+    summary_logger.info("\nSuccessfully Processed Files for Upload:")
+    processed_files = {}
+    for idx, row in df_expanded.iterrows():
+        if pd.notna(row['image_file']):
+            subject = row['src_subject_id']
+            if subject not in processed_files:
+                processed_files[subject] = []
+            processed_files[subject].append({
+                'scan_type': row['scan_type'],
+                'description': row['image_description'],
+                'file': os.path.basename(row['image_file'])
+            })
+    
+    for subject in sorted(processed_files.keys()):
+        summary_logger.info(f"\nSubject: {subject}")
+        for file_info in processed_files[subject]:
+            summary_logger.info(f"  - {file_info['scan_type']} ({file_info['description']})")
+            summary_logger.info(f"    File: {file_info['file']}")
+    
+    # Summary Statistics
+    total_subjects = len(df['src_subject_id'].unique())
+    missing_subjects_count = len(missing_subjects)
+    existing_subjects = total_subjects - missing_subjects_count
+    total_processed_files = sum(len(files) for files in processed_files.values())
+    
+    summary_logger.info(f"\nSummary Statistics:")
+    summary_logger.info(f"Total subjects in CSV: {total_subjects}")
+    summary_logger.info(f"Missing subjects: {missing_subjects_count}")
+    summary_logger.info(f"Existing subjects: {existing_subjects}")
+    summary_logger.info(f"Subjects with missing scans: {len(missing_scans)}")
+    summary_logger.info(f"Total files processed for upload: {total_processed_files}")
 
 
 if __name__ == "__main__":

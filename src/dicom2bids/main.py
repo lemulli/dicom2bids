@@ -23,11 +23,41 @@ def main():
         Path(dir_path).mkdir(parents=True, exist_ok=True)
     
     parser = argparse.ArgumentParser(
-        description="DICOM to BIDS pipeline CLI",
-        epilog="Example usage:\n"
-               "  dicom2bids convert-and-organize [--config config.yaml]\n"
-               "  dicom2bids metadata-enrichment [--config config.yaml]\n"
-               "  dicom2bids finalize-pipeline [--config config.yaml]",
+        description="""DICOM to BIDS Pipeline
+=====================
+
+This pipeline converts DICOM files to BIDS format and prepares them for NIH upload.
+The pipeline consists of several steps that must be run in sequence.
+
+Pipeline Overview
+----------------
+1. Convert DICOM to NIfTI and organize into BIDS structure
+2. Enrich metadata with additional information
+3. Calculate NIfTI statistics
+4. Check for sensitive information
+5. Finalize for upload
+
+Directory Structure
+-----------------
+outputs/
+├── csv/           # CSV files
+├── log/           # Log files
+└── bids/          # BIDS directory structure
+
+Important Notes
+--------------
+- Each step must be run in sequence
+- All outputs are organized in the outputs/ directory
+- Logs are created for each step
+- The pipeline handles sensitive information removal
+- DWI files are automatically zipped for NIH upload""",
+        epilog="""Example usage:
+  dicom2bids convert-and-organize [--config config.yaml]
+  dicom2bids metadata-enrichment [--config config.yaml]
+  dicom2bids finalize-pipeline [--config config.yaml]
+
+For more information about a specific step, use:
+  <command> --help""",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
@@ -38,19 +68,66 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Sub-command to run")
 
     # Subcommand: convert-and-organize
-    parser_convert = subparsers.add_parser("convert-and-organize", help="Convert DICOMs to NIfTI and create partial BIDS")
+    parser_convert = subparsers.add_parser("convert-and-organize", 
+        help="Convert DICOMs to NIfTI and create partial BIDS",
+        description="""Convert DICOM to BIDS
+---------------------------------
+Converts DICOM files to NIfTI format and organizes them into a BIDS-compliant directory structure.
+
+Input:
+- dicom_dir: Directory containing DICOM files
+- bids_dir: Output directory for BIDS structure
+
+Output:
+- Organized BIDS directory structure
+- NIfTI files (.nii.gz)
+- JSON sidecar files
+- Logs in outputs/log/dicom_to_bids.log""",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     parser_convert.add_argument('--dicom-dir', help='Override DICOM directory from config')
     parser_convert.add_argument('--bids-dir', help='Override BIDS directory from config')
     
     # Subcommand: metadata-enrichment
-    parser_meta = subparsers.add_parser("metadata-enrichment", help="Expand CSV, copy NIfTIs, read headers with nibabel")
+    parser_meta = subparsers.add_parser("metadata-enrichment", 
+        help="Expand CSV, copy NIfTIs, read headers with nibabel",
+        description="""Enrich Metadata
+----------------------------------
+Adds additional metadata to the CSV file and copies NIfTI files to the new BIDS directory.
+
+Input:
+- input_csv: Original CSV file
+- output_csv: Path for enriched CSV output
+- old_bids_dir: Original BIDS directory
+- new_bids_dir: New BIDS directory
+- json_map: JSON mapping file
+
+Output:
+- Enriched CSV file
+- Copied NIfTI files
+- Logs in outputs/log/metadata_enrichment.log""",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     parser_meta.add_argument('--input-csv', help='Override input CSV from config')
     parser_meta.add_argument('--old-bids-dir', help='Override old BIDS directory from config')
     parser_meta.add_argument('--new-bids-dir', help='Override new BIDS directory from config')
     parser_meta.add_argument('--t2-json-map', help='Override T2 JSON mapping file from config')
 
     # Subcommand: finalize-pipeline
-    parser_final = subparsers.add_parser("finalize-pipeline", help="Check JSONs, remove them, zip DWI, etc.")
+    parser_final = subparsers.add_parser("finalize-pipeline", 
+        help="Check JSONs, remove them, zip DWI, etc.",
+        description="""Finalize for Upload
+----------------------------------
+Prepares the BIDS directory for NIH upload by removing JSON files and zipping DWI files.
+
+Input:
+- bids_dir: BIDS directory to finalize
+- csv_file: CSV file to update
+
+Output:
+- Cleaned BIDS directory (no JSON files)
+- Zipped DWI files
+- Updated CSV with zip file references
+- Logs in outputs/log/finalize_upload.log""",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     parser_final.add_argument('--bids-dir', help='Override BIDS directory from config')
     parser_final.add_argument('--csv-path', help='Override CSV metadata file from config')
 

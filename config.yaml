@@ -8,7 +8,7 @@ paths:
 
 # CSV File Locations
 csv_files:
-  skeleton_csv: "inputs/csv/skeleton.csv"      # CSV containing BIDS structure template
+  skeleton_csv: "inputs/csv/skeleton.csv"     # Input CSV with subject information
   json_map_csv: "inputs/csv/json_map.csv"      # CSV mapping DICOM tags to BIDS JSON fields
   final_csv: "outputs/csv/final_bids_map.csv"  # Output CSV with final BIDS mapping
 

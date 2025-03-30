@@ -47,6 +47,7 @@ outputs/
 
 # Specific files to ignore
 inputs/csv/skeleton.csv
+inputs/config.yaml
 
 # Log files
 *.log

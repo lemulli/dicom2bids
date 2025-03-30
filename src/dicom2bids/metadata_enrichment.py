@@ -9,7 +9,7 @@ import pandas as pd
 import json
 from datetime import date  # if you want to store a processing date
 from pathlib import Path
-from .config import Config
+from .main import Config, load_config
 from .utils import get_output_path, setup_logging, setup_excluded_scans_logger
 
 # Set up logging
@@ -208,80 +208,11 @@ def merge_json_data(json_map_dict, image_file_path, df, row_idx):
         logger.warning(f"Error parsing {json_file_path}: {e}")
 
 
-def main(config: Config):
-    """
-    Main function combining logic from both notebooks:
-      1) Load skeleton CSV, expand & set constants
-      2) Copy NIfTI & sidecars, merge JSON metadata
-    """
-    # Set up logging
-    setup_logging(config)
-    excluded_scans_logger = setup_excluded_scans_logger(config)
-
-    # Get paths from config
-    input_csv = config.csv_files.skeleton_csv
-    old_bids_dir = config.paths.bids_dir
-    new_bids_dir = config.paths.bids_dir
-    t2_json_map = config.csv_files.json_map_csv
-    output_csv = config.csv_files.final_csv
-
-    logger.info(f"Reading input CSV: {input_csv}")
-    # Skip the first row which contains 'image,3,...' and use the second row as header
-    df = pd.read_csv(input_csv, skiprows=1)
-    logger.info(f"Read {len(df)} rows from CSV.")
-    logger.info(f"Columns in input CSV: {df.columns.tolist()}")
-
-    # 1. (Optional) Add default constants (from 01_constants_to_csv)
-    #    Adjust to your needs: sample placeholders below:
-    df["scan_object"] = "Live"
-    df["image_file_format"] = "NIFTI"
-    df["procdate"] = date.today().strftime('%Y-%m-%d')  # today's date, or a fixed date
-    # Add any others you want
-
-    # 2. Expand for scan types (T2 axial, coronal, etc.)
-    df_expanded = expand_for_scan_types(df)
-    logger.info(f"Expanded to {len(df_expanded)} rows after adding scans.")
-    logger.info(f"Columns in expanded CSV: {df_expanded.columns.tolist()}")
-    logger.info(f"Sample row keys: {df_expanded.iloc[0].keys()}")
-
-    # 3. Load T2 JSON mapping (which columns to pull from sidecar)
-    logger.info(f"Loading T2 JSON mapping from: {t2_json_map}")
-    t2_mapping = pd.read_csv(t2_json_map)
-    logger.info(f"Loaded {len(t2_mapping)} entries in JSON map.")
-    json_map_dict = dict(zip(t2_mapping['json_name'], t2_mapping['csv_name']))
-
-    # 4. For each row, copy NIfTI & sidecars, then read JSON into the CSV
-    rows_to_drop = []
-    for idx, row in df_expanded.iterrows():
-        logger.info(f"Processing row {idx+1}/{len(df_expanded)}...")
-        logger.debug(f"Row data: {row.to_dict()}")
-        new_nii_path = copy_nii_and_sidecars(row, old_bids_dir, new_bids_dir)
-        
-        # Store the final file path in the CSV, so we can see where it actually lives
-        if new_nii_path:
-            df_expanded.at[idx, "image_file"] = new_nii_path
-            merge_json_data(json_map_dict, new_nii_path, df_expanded, idx)
-        else:
-            df_expanded.at[idx, "image_file"] = None
-            # Log excluded scan details
-            excluded_scans_logger.info(f"Scan excluded from NIH DB - Subject: {row['src_subject_id']}, Scan Type: {row.get('scan_type', 'unknown')}, Description: {row.get('image_description', 'unknown')}")
-            rows_to_drop.append(idx)
-
-    # Drop rows with missing files
-    if rows_to_drop:
-        logger.info(f"Dropping {len(rows_to_drop)} rows with missing files")
-        df_expanded = df_expanded.drop(rows_to_drop)
-        logger.info(f"Remaining rows after dropping missing files: {len(df_expanded)}")
-
-    # 5. Write the final CSV
-    logger.info(f"Writing final enriched CSV to: {output_csv}")
-    df_expanded.to_csv(output_csv, index=False)
-    logger.info("Metadata enrichment complete.")
-    logger.info(f"Excluded scans log written to: {excluded_scans_logger.handlers[0].baseFilename}")
+def main():
+    """Main function to run the metadata enrichment pipeline."""
+    config = load_config('config.yaml')
+    metadata_enrichment(config)
 
 
 if __name__ == "__main__":
-    from .config import ConfigManager
-    config_manager = ConfigManager()
-    config = config_manager.get_config()
-    main(config)
+    main()

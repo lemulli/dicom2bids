@@ -7,7 +7,8 @@ import logging
 from pathlib import Path
 from .utils import get_output_path, setup_logging
 import subprocess
-from .config import Config
+from typing import Dict, Any
+from .main import Config
 from datetime import datetime
 
 ################################################################################
@@ -55,7 +56,7 @@ def create_bids_dir(old_dir: Path, new_dir: Path):
     shutil.copytree(old_dir, new_dir, dirs_exist_ok=True)
     logger.info("Finished copying directory structure.")
 
-def run_dcm2niix_on_unprocessed(base_path: Path, config: Config):
+def run_dcm2niix_on_unprocessed(base_path: Path, config: Dict[str, Any]):
     """
     Find folders with .dcm files, convert them to NIfTI, remove .dcm.
     """
@@ -84,8 +85,8 @@ def run_dcm2niix_on_unprocessed(base_path: Path, config: Config):
         print(f"Folder: {scan_folder}")
         
         # Add header to log files in outputs/log directory
-        conversion_log = str(Path(config.paths.log_dir) / "dcm2niix.log")
-        errors_log = str(Path(config.paths.log_dir) / "dcm2niix.err")
+        conversion_log = str(Path(config['paths']['log_dir']) / "dcm2niix.log")
+        errors_log = str(Path(config['paths']['log_dir']) / "dcm2niix.err")
         
         log_header = f"""
 === Processing DICOM folder ===
@@ -249,7 +250,7 @@ def sort_files(base_path: Path):
                     for item in remaining_items:
                         logger.error(f"  - {item.name} (is_dir: {item.is_dir()})")
 
-def cleanup(base_path: Path, config: Config):
+def cleanup(base_path: Path, config: Dict[str, Any]):
     """
     1) Remove leftover dti dirs
     2) Gzip .nii if configured
@@ -266,14 +267,14 @@ def cleanup(base_path: Path, config: Config):
                 logger.info(f"Removed leftover dti folder {dti_path} (had contents? {has_contents})")
 
     # Gzip any *.nii if configured
-    if config.processing.compress_nifti:
+    if config['processing']['compress_nifti']:
         for subject_dir in base_path.iterdir():
             if subject_dir.is_dir():
                 cmd = f'find "{subject_dir}" -type f -name "*.nii" -exec gzip {{}} \\;'
                 os.system(cmd)
 
     # Set up small files log
-    small_files_log = str(Path(config.paths.log_dir) / "small_files.log")
+    small_files_log = str(Path(config['paths']['log_dir']) / "small_files.log")
     with open(small_files_log, "w") as f:
         f.write("=== Small NIfTI Files Report ===\n\n")
 
@@ -344,70 +345,10 @@ def cleanup(base_path: Path, config: Config):
 ################################################################################
 # MAIN
 ################################################################################
-def main(config: Config):
-    """
-    Main function to convert DICOM files to BIDS format.
-    
-    Parameters:
-    config (Config): Configuration object containing all necessary settings
-    """
-    # Set up logging
-    setup_logging(config)
-
-    # Convert string paths to Path objects
-    dicom_dir = Path(config.paths.dicom_dir)
-    bids_dir = Path(config.paths.bids_dir)
-
-    print("\n=== Starting DICOM to BIDS Conversion Pipeline ===")
-    print(f"DICOM Directory: {dicom_dir}")
-    print(f"BIDS Directory: {bids_dir}\n")
-
-    # Create output directory if it doesn't exist
-    os.makedirs(bids_dir, exist_ok=True)
-
-    # Check if dcm2niix is installed
-    print("Step 1/5: Checking dcm2niix installation...")
-    if not check_dcm2niix():
-        print("✗ Error: dcm2niix is not installed. Please install it first.")
-        sys.exit(1)
-    print("✓ dcm2niix is installed and accessible")
-
-    # Create BIDS directory structure with copies of DICOM files
-    print("\nStep 2/5: Copying DICOM files to BIDS directory...")
-    create_bids_dir(dicom_dir, bids_dir)
-    print("✓ DICOM files copied successfully")
-
-    # Run dcm2niix on the copied files in bids_dir
-    print("\nStep 3/5: Converting DICOM files to NIfTI format...")
-    run_dcm2niix_on_unprocessed(bids_dir, config)
-    print("✓ DICOM to NIfTI conversion complete")
-
-    # Generate BIDS structure
-    print("\nStep 4/5: Organizing files into BIDS structure...")
-    generate_bids_structure(bids_dir)
-    sort_files(bids_dir)
-    print(f"✓ Files organized into BIDS structure at: {bids_dir}")
-
-    # Clean up temporary files
-    print("\nStep 5/5: Performing final cleanup...")
-    cleanup(bids_dir, config)
-    
-    # Count small files from the log
-    small_files_log = Path(config.paths.log_dir) / "small_files.log"
-    if small_files_log.exists():
-        with open(small_files_log, "r") as f:
-            content = f.read()
-            small_files_count = content.count("Subject:")
-        print(f"✓ Cleanup complete. Found {small_files_count} suspiciously small files")
-        print(f"  Small files report available at: {small_files_log}")
-    else:
-        print("✓ Cleanup complete. No small files found")
-
-    print("\n=== DICOM to BIDS Conversion Complete! ===")
-    logger.info("DICOM to BIDS conversion complete!")
+def main():
+    """Main function to run the conversion and organization pipeline."""
+    config = load_config('config.yaml')
+    convert_and_organize(config)
 
 if __name__ == "__main__":
-    from .config import ConfigManager
-    config_manager = ConfigManager()
-    config = config_manager.get_config()
-    main(config)
+    main()

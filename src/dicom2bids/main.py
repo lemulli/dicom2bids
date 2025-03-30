@@ -4,30 +4,15 @@
 import argparse
 import sys
 import os
+import yaml
 from pathlib import Path
-from .config import ConfigManager
+from .pipeline import convert_and_organize, metadata_enrichment, finalize
+from .utils import show_help
 
-def main():
-    # Initialize config manager
-    config_manager = ConfigManager()
-    config = config_manager.get_config()
-    
-    # Create output directories
-    output_dirs = [
-        config.paths.bids_dir,
-        config.paths.log_dir,
-        os.path.dirname(config.csv_files.final_csv)
-    ]
-    
-    for dir_path in output_dirs:
-        Path(dir_path).mkdir(parents=True, exist_ok=True)
-    
+def setup_parser():
+    """Set up the argument parser."""
     parser = argparse.ArgumentParser(
         description="DICOM to BIDS pipeline CLI",
-        epilog="Example usage:\n"
-               "  dicom2bids convert-and-organize [--config config.yaml]\n"
-               "  dicom2bids metadata-enrichment [--config config.yaml]\n"
-               "  dicom2bids finalize-pipeline [--config config.yaml]",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
@@ -54,61 +39,61 @@ def main():
     parser_final.add_argument('--bids-dir', help='Override BIDS directory from config')
     parser_final.add_argument('--csv-path', help='Override CSV metadata file from config')
 
-    # Parse CLI
+    return parser
+
+def main():
+    # Set up parser first
+    parser = setup_parser()
     args = parser.parse_args()
+    
+    # Handle help cases first
+    if len(sys.argv) == 1 or args.command is None or any(arg in ['--help', '-h'] for arg in sys.argv):
+        show_help()
+        return
+    
+    # Load config
+    if not os.path.exists(args.config):
+        print(f"Error: Config file not found: {args.config}")
+        return
+    
+    with open(args.config) as f:
+        config = yaml.safe_load(f)
+    
+    # Create output directories
+    output_dirs = [
+        config['paths']['bids_dir'],
+        config['paths']['log_dir'],
+        os.path.dirname(config['csv_files']['final_csv'])
+    ]
+    
+    for dir_path in output_dirs:
+        Path(dir_path).mkdir(parents=True, exist_ok=True)
 
-    # Update config with command line arguments if provided
-    if args.config != 'config.yaml':
-        config_manager = ConfigManager(args.config)
-        config = config_manager.get_config()
-
-    # Handle command-specific overrides
+    # Handle command-specific overrides and run pipeline
     if args.command == "convert-and-organize":
-        updates = {}
         if args.dicom_dir:
-            updates['paths'] = {'dicom_dir': args.dicom_dir}
+            config['paths']['dicom_dir'] = args.dicom_dir
         if args.bids_dir:
-            updates['paths'] = {'bids_dir': args.bids_dir}
-        if updates:
-            config_manager.update_config(updates)
-            config = config_manager.get_config()
-        
-        from .convert_and_organize import main as convert_main
-        convert_main(config)
+            config['paths']['bids_dir'] = args.bids_dir
+        convert_and_organize(config)
 
     elif args.command == "metadata-enrichment":
-        updates = {}
         if args.input_csv:
-            updates['csv_files'] = {'skeleton_csv': args.input_csv}
+            config['csv_files']['skeleton_csv'] = args.input_csv
         if args.old_bids_dir:
-            updates['paths'] = {'bids_dir': args.old_bids_dir}
+            config['paths']['bids_dir'] = args.old_bids_dir
         if args.new_bids_dir:
-            updates['paths'] = {'bids_dir': args.new_bids_dir}
+            config['paths']['bids_dir'] = args.new_bids_dir
         if args.t2_json_map:
-            updates['csv_files'] = {'json_map_csv': args.t2_json_map}
-        if updates:
-            config_manager.update_config(updates)
-            config = config_manager.get_config()
-        
-        from .metadata_enrichment import main as meta_main
-        meta_main(config)
+            config['csv_files']['json_map_csv'] = args.t2_json_map
+        metadata_enrichment(config)
 
     elif args.command == "finalize-pipeline":
-        updates = {}
         if args.bids_dir:
-            updates['paths'] = {'bids_dir': args.bids_dir}
+            config['paths']['bids_dir'] = args.bids_dir
         if args.csv_path:
-            updates['csv_files'] = {'final_csv': args.csv_path}
-        if updates:
-            config_manager.update_config(updates)
-            config = config_manager.get_config()
-        
-        from .finalize_pipeline import main as finalize_main
-        finalize_main(config)
-
-    else:
-        parser.print_help()
-        sys.exit(1)
+            config['csv_files']['final_csv'] = args.csv_path
+        finalize(config)
 
 if __name__ == "__main__":
     main()

@@ -7,8 +7,8 @@ import logging
 import zipfile
 import pandas as pd
 from pathlib import Path
-from typing import List, Dict
-from .config import Config
+from typing import List, Dict, Any
+from .main import Config, load_config
 from .utils.logging import setup_logging
 
 # Set up logging
@@ -79,14 +79,8 @@ def update_csv_file(csv_file: str) -> None:
     except Exception as e:
         logger.error(f"Error updating CSV file: {e}")
 
-def main(config: Config):
-    """
-    Main function to finalize BIDS directory for upload by removing JSON files,
-    zipping DWI files, and updating CSV file.
-    
-    Parameters:
-    config (Config): Configuration object containing all necessary settings
-    """
+def finalize(config: Dict[str, Any]):
+    """Finalize the pipeline for upload."""
     # Set up logging
     setup_logging(config)
 
@@ -110,8 +104,10 @@ def main(config: Config):
 
     logger.info("Finalization complete!")
 
+def main():
+    """Main function to run the finalize pipeline."""
+    config = load_config('config.yaml')
+    finalize(config)
+
 if __name__ == "__main__":
-    from .config import ConfigManager
-    config_manager = ConfigManager()
-    config = config_manager.get_config()
-    main(config) 
+    main() 

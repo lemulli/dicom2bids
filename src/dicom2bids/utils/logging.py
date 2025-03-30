@@ -4,15 +4,14 @@
 import sys
 import logging
 from pathlib import Path
-from typing import Optional
-from ..config import Config
+from typing import Optional, Dict, Any
 
-def setup_logging(config: Config, logger_name: Optional[str] = None) -> logging.Logger:
+def setup_logging(config: Dict[str, Any], logger_name: Optional[str] = None) -> logging.Logger:
     """
     Set up logging with console and file handlers based on configuration.
     
     Parameters:
-    config (Config): Configuration object containing logging settings
+    config (Dict[str, Any]): Configuration dictionary containing logging settings
     logger_name (Optional[str]): Name of the logger to set up. If None, uses the caller's name.
     
     Returns:
@@ -40,7 +39,7 @@ def setup_logging(config: Config, logger_name: Optional[str] = None) -> logging.
     logger.addHandler(critical_handler)
     
     # File handler: record INFO+ to configured log file
-    log_file = str(Path(config.paths.log_dir) / config.logging.file)
+    log_file = str(Path(config['paths']['log_dir']) / config['logging']['file'])
     file_handler = logging.FileHandler(log_file, mode="w")
     file_handler.setLevel(logging.INFO)
     file_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
@@ -48,7 +47,7 @@ def setup_logging(config: Config, logger_name: Optional[str] = None) -> logging.
     logger.addHandler(file_handler)
     
     # Warning handler: record WARNING+ to error log
-    error_log = str(Path(config.paths.log_dir) / f"{Path(config.logging.file).stem}.err")
+    error_log = str(Path(config['paths']['log_dir']) / f"{Path(config['logging']['file']).stem}.err")
     error_handler = logging.FileHandler(error_log, mode="w")
     error_handler.setLevel(logging.WARNING)
     error_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
@@ -57,17 +56,17 @@ def setup_logging(config: Config, logger_name: Optional[str] = None) -> logging.
     
     return logger
 
-def setup_excluded_scans_logger(config: Config) -> logging.Logger:
+def setup_excluded_scans_logger(config: Dict[str, Any]) -> logging.Logger:
     """
     Set up a special logger for excluded scans.
     
     Parameters:
-    config (Config): Configuration object containing logging settings
+    config (Dict[str, Any]): Configuration dictionary containing logging settings
     
     Returns:
     logging.Logger: Configured logger instance for excluded scans
     """
-    excluded_scans_log = str(Path(config.paths.log_dir) / "excluded_scans.log")
+    excluded_scans_log = str(Path(config['paths']['log_dir']) / "excluded_scans.log")
     excluded_scans_logger = logging.getLogger('excluded_scans')
     excluded_scans_logger.handlers = []  # Remove any existing handlers
     

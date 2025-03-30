@@ -16,17 +16,13 @@ dependencies = [
     "nibabel",
     "numpy",
     "pandas",
-    "pathlib",
     "pyyaml",
+    "pathlib",
+    "typing-extensions",
 ]
 
 [project.scripts]
 dicom2bids = "dicom2bids.main:main"
-metadata-enrichment = "dicom2bids.metadata_enrichment:main"
-nifti-calculations = "dicom2bids.nifti_calculations:main"
-check-sensitive-data = "dicom2bids.check_sensitive_data:main"
-finalize-upload = "dicom2bids.finalize_upload:main"
-show-help = "dicom2bids.help:show_help"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dicom2bids"]

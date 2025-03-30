@@ -5,7 +5,7 @@ import sys
 import logging
 from pathlib import Path
 from typing import Optional
-from ..config import Config
+from .config import Config
 
 def setup_logging(config: Config, logger_name: Optional[str] = None) -> logging.Logger:
     """

@@ -2,7 +2,7 @@
 DICOM to BIDS conversion pipeline.
 """
 
-from .config import Config, ConfigManager
+from .utils.config import Config, ConfigManager
 from .convert_and_organize import main as convert_main
 from .metadata_enrichment import main as metadata_main
 from .finalize_pipeline import main as finalize_main

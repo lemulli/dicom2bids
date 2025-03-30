@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
 # metadata_enrichment.py
 
+import warnings
+warnings.filterwarnings('ignore', category=FutureWarning, module='pandas')
+
 import os
 import sys
 import shutil   # for file copying (instead of os.system('cp ...'))
 import logging
 import pandas as pd
 import json
-from datetime import date  # if you want to store a processing date
+import nibabel as nib
+from datetime import date, datetime
 from pathlib import Path
-from .config import Config
+from .utils.config import Config
 from .utils import get_output_path, setup_logging, setup_excluded_scans_logger
+from .utils.config import ConfigManager
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -92,7 +97,7 @@ def copy_nii_and_sidecars(row, old_bids_dir: str, new_bids_dir: str) -> tuple[st
     # Construct path to subject's directory
     old_dir_path = os.path.join(old_bids_dir, subject_dir, "ses-01")
     if not os.path.exists(old_dir_path):
-        return None, f"Subject directory not found: {old_dir_path}"
+        return None, f"Missing Subject Directory: {old_dir_path}"
 
     # Decide subdirectory by scan type
     if scan_type == "MR structural (T2)":
@@ -103,7 +108,7 @@ def copy_nii_and_sidecars(row, old_bids_dir: str, new_bids_dir: str) -> tuple[st
         old_dir_path = os.path.join(old_dir_path, "fmri")
 
     if not os.path.exists(old_dir_path):
-        return None, f"Scan type directory not found: {old_dir_path}"
+        return None, f"Missing Scan Type Directory: {old_dir_path}"
 
     # Build new_dir by taking the relative path from old_bids_dir
     rel_path = os.path.relpath(old_dir_path, start=old_bids_dir)
@@ -196,7 +201,8 @@ def merge_json_data(json_map_dict, image_file_path, df, row_idx):
                 val = json_data[json_key]
                 if isinstance(val, list):
                     val = str(val)  # convert list to string
-                df.at[row_idx, csv_col] = val
+                # Convert to string to avoid dtype issues
+                df.at[row_idx, csv_col] = str(val)
 
     except Exception as e:
         logger.warning(f"Error parsing {json_file_path}: {e}")
@@ -212,7 +218,7 @@ def setup_summary_logger(config):
         summary_logger.removeHandler(handler)
     
     # Create handlers
-    summary_file = os.path.join(config.paths.log_dir, 'metadata_enrichment_summary.log')
+    summary_file = os.path.join(config.paths.log_dir, 'metadata_summary.log')
     os.makedirs(os.path.dirname(summary_file), exist_ok=True)
     file_handler = logging.FileHandler(summary_file, mode='w')
     file_handler.setLevel(logging.INFO)
@@ -224,6 +230,9 @@ def setup_summary_logger(config):
     # Add handlers to the logger
     summary_logger.addHandler(file_handler)
     
+    # Prevent propagation to root logger to avoid stdout output
+    summary_logger.propagate = False
+    
     return summary_logger
 
 
@@ -232,12 +241,18 @@ def main(config: Config):
     Main function combining logic from both notebooks:
       1) Load skeleton CSV, expand & set constants
       2) Copy NIfTIs & sidecars, merge JSON metadata
+      3) Calculate NIfTI statistics
     """
     # Set up logging
     setup_logging(config)
     excluded_scans_logger = setup_excluded_scans_logger(config)
     summary_logger = setup_summary_logger(config)
     
+    print("\n=== Starting Metadata Enrichment Pipeline ===")
+    print(f"Input CSV: {config.csv_files.skeleton_csv}")
+    print(f"BIDS Directory: {config.paths.bids_dir}")
+    print(f"JSON Map: {config.csv_files.json_map_csv}\n")
+
     # Get paths from config
     input_csv = config.csv_files.skeleton_csv
     old_bids_dir = config.paths.bids_dir
@@ -245,33 +260,45 @@ def main(config: Config):
     t2_json_map = config.csv_files.json_map_csv
     output_csv = config.csv_files.final_csv
 
+    print("Step 1/6: Reading and validating input CSV...")
     logger.info(f"Reading input CSV: {input_csv}")
     # Skip the first row which contains 'image,3,...' and use the second row as header
-    df = pd.read_csv(input_csv, skiprows=1)
+    # Initialize all columns as string type
+    df = pd.read_csv(input_csv, skiprows=1, dtype=str)
     logger.info(f"Read {len(df)} rows from CSV.")
     logger.info(f"Columns in input CSV: {df.columns.tolist()}")
+    print(f"✓ Read {len(df)} subjects from CSV\n")
 
+    print("Step 2/6: Adding default metadata...")
     # 1. (Optional) Add default constants (from 01_constants_to_csv)
     #    Adjust to your needs: sample placeholders below:
     df["scan_object"] = "Live"
     df["image_file_format"] = "NIFTI"
     df["procdate"] = date.today().strftime('%Y-%m-%d')  # today's date, or a fixed date
-    # Add any others you want
+    print("✓ Added default metadata fields\n")
 
+    print("Step 3/6: Expanding for scan types...")
     # 2. Expand for scan types (T2 axial, coronal, etc.)
     df_expanded = expand_for_scan_types(df)
-    logger.info(f"Expanded to {len(df_expanded)} rows after adding scans.")
-    logger.info(f"Columns in expanded CSV: {df_expanded.columns.tolist()}")
-    logger.info(f"Sample row keys: {df_expanded.iloc[0].keys()}")
+    # Ensure all columns in expanded df are string type
+    for col in df_expanded.columns:
+        df_expanded[col] = df_expanded[col].astype(str)
+    print(f"✓ Expanded from {len(df)} to {len(df_expanded)} rows\n")
 
+    print("Step 4/6: Loading JSON mapping...")
     # 3. Load T2 JSON mapping (which columns to pull from sidecar)
     logger.info(f"Loading T2 JSON mapping from: {t2_json_map}")
     t2_mapping = pd.read_csv(t2_json_map)
     logger.info(f"Loaded {len(t2_mapping)} entries in JSON map.")
     json_map_dict = dict(zip(t2_mapping['json_name'], t2_mapping['csv_name']))
+    print(f"✓ Loaded {len(t2_mapping)} JSON mapping entries\n")
 
+    print("Step 5/6: Processing files...")
     # 4. For each row, copy NIfTI & sidecars, then read JSON into the CSV
     rows_to_drop = []
+    total_rows = len(df_expanded)
+    processed_count = 0
+    
     for idx, row in df_expanded.iterrows():
         logger.info(f"Processing row {idx+1}/{len(df_expanded)}...")
         logger.debug(f"Row data: {row.to_dict()}")
@@ -279,13 +306,30 @@ def main(config: Config):
         
         # Store the final file path in the CSV, so we can see where it actually lives
         if new_nii_path:
-            df_expanded.at[idx, "image_file"] = new_nii_path
+            df_expanded.at[idx, "image_file"] = str(new_nii_path)  # Convert to string to avoid dtype issues
             merge_json_data(json_map_dict, new_nii_path, df_expanded, idx)
+            processed_count += 1
         else:
             df_expanded.at[idx, "image_file"] = None
-            # Log excluded scan details
-            excluded_scans_logger.info(f"Scan excluded from NIH DB - Subject: {row['src_subject_id']}, Scan Type: {row.get('scan_type', 'unknown')}, Description: {row.get('image_description', 'unknown')}, Reason: {reason}")
+            # Enhanced logging for excluded scans
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            excluded_scans_logger.info(f"""
+=== Excluded Scan Report ===
+Timestamp: {timestamp}
+Subject: {row['src_subject_id']}
+Scan Type: {row.get('scan_type', 'unknown')}
+Description: {row.get('image_description', 'unknown')}
+Category: {reason.split(':')[0] if ':' in reason else 'Unknown'}
+Reason: {reason}
+Searched Path: {os.path.join(old_bids_dir, convert_subject_id_to_dir(row['src_subject_id']), 'ses-01')}
+""")
             rows_to_drop.append(idx)
+        
+        # Print progress
+        progress = (idx + 1) / total_rows * 100
+        print(f"\rProgress: {progress:.1f}% ({idx + 1}/{total_rows} rows)", end="")
+    
+    print("\n✓ Processed files complete\n")
 
     # Drop rows with missing files
     if rows_to_drop:
@@ -293,13 +337,27 @@ def main(config: Config):
         df_expanded = df_expanded.drop(rows_to_drop)
         logger.info(f"Remaining rows after dropping missing files: {len(df_expanded)}")
 
-    # 5. Write the final CSV
-    logger.info(f"Writing final enriched CSV to: {output_csv}")
-    df_expanded.to_csv(output_csv, index=False)
-    logger.info("Metadata enrichment complete.")
-    logger.info(f"Excluded scans log written to: {excluded_scans_logger.handlers[0].baseFilename}")
+    print("Step 6/6: Calculating NIfTI statistics...")
+    from .nifti_calculations import process_nifti_file
+    nifti_stats_count = 0
+    
+    for idx, row in df_expanded.iterrows():
+        if pd.notna(row['image_file']):
+            metadata = process_nifti_file(row['image_file'])
+            if metadata:
+                for key, value in metadata.items():
+                    df_expanded.at[idx, key] = str(value)
+                nifti_stats_count += 1
+            else:
+                logger.warning(f"Failed to process NIfTI file: {row['image_file']}")
+    
+    print(f"✓ Calculated statistics for {nifti_stats_count} NIfTI files\n")
 
-    # 7. Generate summary report
+    # Write the final CSV
+    print(f"Writing final enriched CSV to: {output_csv}")
+    df_expanded.to_csv(output_csv, index=False)
+    
+    # Generate summary report
     summary_logger.info("=== Metadata Enrichment Summary Report ===\n")
     
     # Missing Subjects
@@ -355,10 +413,16 @@ def main(config: Config):
     summary_logger.info(f"Existing subjects: {existing_subjects}")
     summary_logger.info(f"Subjects with missing scans: {len(missing_scans)}")
     summary_logger.info(f"Total files processed for upload: {total_processed_files}")
+    summary_logger.info(f"Files with NIfTI statistics: {nifti_stats_count}")
+
+    print("\n=== Metadata Enrichment Complete! ===")
+    print(f"✓ Successfully processed {processed_count} files")
+    print(f"✓ Found {missing_subjects_count} missing subjects")
+    print(f"✓ Calculated NIfTI statistics for {nifti_stats_count} files")
+    print(f"✓ Generated summary report at: {os.path.join(config.paths.log_dir, 'metadata_enrichment_summary.log')}\n")
 
 
 if __name__ == "__main__":
-    from .config import ConfigManager
     config_manager = ConfigManager()
     config = config_manager.get_config()
     main(config)

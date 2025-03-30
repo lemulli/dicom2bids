@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from .utils import get_output_path, setup_logging
 import subprocess
-from .config import Config
+from .utils.config import Config
 from datetime import datetime
 
 ################################################################################
@@ -407,7 +407,7 @@ def main(config: Config):
     logger.info("DICOM to BIDS conversion complete!")
 
 if __name__ == "__main__":
-    from .config import ConfigManager
+    from .utils.config import ConfigManager
     config_manager = ConfigManager()
     config = config_manager.get_config()
     main(config)

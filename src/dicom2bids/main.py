@@ -5,7 +5,7 @@ import argparse
 import sys
 import os
 from pathlib import Path
-from .config import ConfigManager
+from .utils.config import ConfigManager
 
 def main():
     # Initialize config manager

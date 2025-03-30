@@ -43,9 +43,10 @@ Thumbs.db
 *.bval
 *.bvec
 *.json
-*.csv
 outputs/
-inputs/
+
+# Specific files to ignore
+inputs/csv/skeleton.csv
 
 # Log files
 *.log

@@ -34,3 +34,24 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db 
+
+# DICOM and Medical Imaging files
+*.dcm
+*.nii
+*.nii.gz
+*.bval
+*.bvec
+*.json
+*.csv
+outputs/
+inputs/
+
+# Log files
+*.log
+outputs/log/
+
+# Large data directories
+data/
+raw/
+derivatives/
+sourcedata/
